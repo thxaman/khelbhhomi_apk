@@ -7,6 +7,7 @@ from kivy.clock import Clock
 from kivy.graphics.texture import Texture
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.core.window import Window
+from kivy.utils import platform
 
 import cv2
 import numpy as np
@@ -15,26 +16,43 @@ import numpy as np
 from height_estimator import HeightEstimator
 from reach_test import ReachTestAnalyzer
 from situp_counter import SitUpCounter
+from broad_jump import BroadJumpAnalyzer
+from vertical_jump import VerticalJumpAnalyzer
+from sit_reach_box import SitReachBoxAnalyzer
+
+GLOBAL_USER_HEIGHT = 170
 
 class MenuScreen(Screen):
     def __init__(self, **kwargs):
         super(MenuScreen, self).__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=20)
+        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
         
-        title = Label(text="Fitness Vision Tools", font_size=32, size_hint=(1, 0.2))
+        title = Label(text="Fitness Vision Tools", font_size=32, size_hint=(1, 0.15))
         layout.add_widget(title)
         
-        btn_height = Button(text="Height Measurement", font_size=24, background_color=(0, 0.5, 1, 1))
+        btn_height = Button(text="Height Measurement", font_size=20, background_color=(0, 0.5, 1, 1))
         btn_height.bind(on_press=self.go_to_height)
         layout.add_widget(btn_height)
         
-        btn_reach = Button(text="Sit and Reach Test", font_size=24, background_color=(0, 0.8, 0.2, 1))
+        btn_reach = Button(text="Sit and Reach (Side)", font_size=20, background_color=(0, 0.8, 0.2, 1))
         btn_reach.bind(on_press=self.go_to_reach)
         layout.add_widget(btn_reach)
         
-        btn_situps = Button(text="Sit-Up Counter", font_size=24, background_color=(1, 0.5, 0, 1))
+        btn_situps = Button(text="Sit-Up Counter", font_size=20, background_color=(1, 0.5, 0, 1))
         btn_situps.bind(on_press=self.go_to_situps)
         layout.add_widget(btn_situps)
+
+        btn_broad = Button(text="Broad Jump", font_size=20, background_color=(0.5, 0, 0.5, 1))
+        btn_broad.bind(on_press=self.go_to_broad)
+        layout.add_widget(btn_broad)
+
+        btn_vertical = Button(text="Vertical Jump", font_size=20, background_color=(0.8, 0.2, 0.2, 1))
+        btn_vertical.bind(on_press=self.go_to_vertical)
+        layout.add_widget(btn_vertical)
+
+        btn_reach_box = Button(text="Sit and Reach (Box)", font_size=20, background_color=(0, 0.5, 0.5, 1))
+        btn_reach_box.bind(on_press=self.go_to_reach_box)
+        layout.add_widget(btn_reach_box)
         
         self.add_widget(layout)
 
@@ -48,6 +66,18 @@ class MenuScreen(Screen):
 
     def go_to_situps(self, instance):
         self.manager.get_screen('camera').start_camera(SitUpCounter())
+        self.manager.current = 'camera'
+
+    def go_to_broad(self, instance):
+        self.manager.get_screen('camera').start_camera(BroadJumpAnalyzer(user_height_cm=GLOBAL_USER_HEIGHT))
+        self.manager.current = 'camera'
+
+    def go_to_vertical(self, instance):
+        self.manager.get_screen('camera').start_camera(VerticalJumpAnalyzer(user_height_cm=GLOBAL_USER_HEIGHT))
+        self.manager.current = 'camera'
+
+    def go_to_reach_box(self, instance):
+        self.manager.get_screen('camera').start_camera(SitReachBoxAnalyzer())
         self.manager.current = 'camera'
 
 class CameraScreen(Screen):
@@ -74,6 +104,8 @@ class CameraScreen(Screen):
         self.processor = processor
         # 0 is usually the default camera. On Android, this might need adjustment or permissions.
         self.capture = cv2.VideoCapture(0)
+        if not self.capture.isOpened():
+            print("Error: Could not open camera.")
         self.event = Clock.schedule_interval(self.update, 1.0 / 30.0) # 30 FPS
 
     def stop_camera(self, instance=None):
@@ -86,12 +118,20 @@ class CameraScreen(Screen):
         self.manager.current = 'menu'
 
     def update(self, dt):
+        global GLOBAL_USER_HEIGHT
         if self.capture:
             ret, frame = self.capture.read()
             if ret:
                 # Process the frame using the selected logic
                 if self.processor:
                     frame = self.processor.process_frame(frame)
+                    
+                    # Check for height update
+                    if isinstance(self.processor, HeightEstimator):
+                        h = self.processor.get_height()
+                        if h is not None:
+                            GLOBAL_USER_HEIGHT = h
+                            # Optional: Show a toast or label that height is updated
 
                 # Convert to Kivy Texture
                 # Flip vertical because Kivy textures are upside down
@@ -109,6 +149,16 @@ class FitnessApp(App):
         sm.add_widget(MenuScreen(name='menu'))
         sm.add_widget(CameraScreen(name='camera'))
         return sm
+
+    def on_start(self):
+        if platform == 'android':
+            from android.permissions import request_permissions, Permission
+            request_permissions([
+                Permission.CAMERA,
+                Permission.WRITE_EXTERNAL_STORAGE,
+                Permission.READ_EXTERNAL_STORAGE
+            ])
+
 
 if __name__ == '__main__':
     FitnessApp().run()

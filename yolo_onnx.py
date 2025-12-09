@@ -123,3 +123,69 @@ class Wrapper:
         
     def numpy(self):
         return self.data
+
+class YOLOv8Detect:
+    def __init__(self, path, conf_thres=0.5, iou_thres=0.45):
+        self.net = cv2.dnn.readNetFromONNX(path)
+        self.conf_thres = conf_thres
+        self.iou_thres = iou_thres
+
+    def __call__(self, img, verbose=False):
+        blob = cv2.dnn.blobFromImage(img, 1/255.0, (640, 640), swapRB=True, crop=False)
+        self.net.setInput(blob)
+        out = self.net.forward()
+        
+        out = out[0].transpose()
+        
+        # Output shape: 8400 x (4 + num_classes)
+        if out.shape[1] < 5:
+             return DetectResults([])
+
+        scores = np.max(out[:, 4:], axis=1)
+        mask = scores > self.conf_thres
+        out = out[mask]
+        scores = scores[mask]
+        
+        if len(out) == 0:
+            return DetectResults([])
+            
+        class_ids = np.argmax(out[:, 4:], axis=1)
+        boxes = out[:, 0:4]
+        
+        boxes_nms = boxes.copy()
+        boxes_nms[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
+        boxes_nms[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
+        
+        indices = cv2.dnn.NMSBoxes(boxes_nms.tolist(), scores.tolist(), self.conf_thres, self.iou_thres)
+        
+        final_boxes = []
+        h, w = img.shape[:2]
+        scale_x = w / 640
+        scale_y = h / 640
+        
+        for i in indices:
+            idx = i if isinstance(i, (int, np.integer)) else i[0]
+            box = boxes_nms[idx]
+            x, y, bw, bh = box
+            
+            x1 = x * scale_x
+            y1 = y * scale_y
+            x2 = (x + bw) * scale_x
+            y2 = (y + bh) * scale_y
+            
+            conf = scores[idx]
+            cls = class_ids[idx]
+            
+            final_boxes.append(Box(x1, y1, x2, y2, conf, cls))
+            
+        return DetectResults(final_boxes)
+
+class Box:
+    def __init__(self, x1, y1, x2, y2, conf, cls):
+        self.xyxy = [np.array([x1, y1, x2, y2])]
+        self.conf = Wrapper(np.array([conf]))
+        self.cls = cls
+
+class DetectResults:
+    def __init__(self, boxes):
+        self.boxes = boxes

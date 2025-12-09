@@ -127,3 +127,8 @@ class HeightEstimator:
         cv2.line(img, (350, 450), (350, 500), (200, 200, 200), 1)
 
         return img
+
+    def get_height(self):
+        if self.measurement_done:
+            return self.final_height
+        return None
