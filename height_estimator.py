@@ -1,5 +1,5 @@
 import cv2
-from ultralytics import YOLO
+from yolo_onnx import YOLOv8Pose
 import os
 import time
 import statistics
@@ -7,7 +7,8 @@ from collections import deque
 
 class HeightEstimator:
     def __init__(self):
-        self.model = YOLO("yolov8n-pose.pt")
+        # Use ONNX model
+        self.model = YOLOv8Pose("yolov8n-pose.onnx")
         self.height_buffer = deque(maxlen=10)
         self.measurement_buffer = []
         self.final_height = 0
@@ -39,9 +40,13 @@ class HeightEstimator:
         aligned = False
         raw_height = 0
 
-        if results[0].keypoints is not None and results[0].keypoints.xy.shape[0] > 0:
-            img = results[0].plot(boxes=False)
-            kpts = results[0].keypoints.xy[0].cpu().numpy()
+        if results.keypoints.data is not None:
+            # Draw skeleton manually
+            kpts = results.keypoints.xy.numpy()[0] # Get (17, 2) array
+            
+            # Draw skeleton using our helper
+            full_kpts = results.keypoints.data # Access the raw numpy array from Keypoints class
+            img = self.model.draw_skeleton(img, full_kpts)
             
             if len(kpts) >= 17:
                 nose = (int(kpts[0][0]), int(kpts[0][1]))

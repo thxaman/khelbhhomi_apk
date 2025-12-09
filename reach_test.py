@@ -1,12 +1,12 @@
 import cv2
-from ultralytics import YOLO
+from yolo_onnx import YOLOv8Pose
 import numpy as np
 from collections import deque
 import statistics
 
 class ReachTestAnalyzer:
     def __init__(self, real_height_cm=170):
-        self.model = YOLO('yolov8n-pose.pt')
+        self.model = YOLOv8Pose('yolov8n-pose.onnx')
         self.REAL_HEIGHT_CM = real_height_cm
         
         # --- PHYSICS ---
@@ -37,7 +37,7 @@ class ReachTestAnalyzer:
         pts = []
         for k in kps_list:
             if k[idx][2] > 0.5:
-                pts.append(k[idx][:2].cpu().numpy())
+                pts.append(k[idx][:2]) # Only x,y
         if not pts: return None
         return np.mean(pts, axis=0)
 
@@ -49,8 +49,9 @@ class ReachTestAnalyzer:
     def process_frame(self, frame):
         results = self.model(frame, verbose=False)
         
-        if results[0].keypoints is not None and results[0].keypoints.data.shape[0] > 0:
-            raw_kps = results[0].keypoints.data[0]
+        if results.keypoints.data is not None:
+            # Access raw data (17, 3)
+            raw_kps = results.keypoints.data
             self.kps_buffer.append(raw_kps)
             
             if len(self.kps_buffer) < 5: return frame
