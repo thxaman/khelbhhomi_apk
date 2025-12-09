@@ -27,23 +27,65 @@ GLOBAL_USER_HEIGHT = 170
 #  FIXED ANDROID CAMERA OPEN FUNCTION
 # ================================================
 def open_android_camera():
-    """Open Camera using Android Camera2 backend + fail-safe settings."""
+    """Open Camera using multiple fallback strategies for Android."""
+    import time
+    
+    # Disable OpenCL and limit threads for stability
     cv2.setNumThreads(1)
     cv2.ocl.setUseOpenCL(False)
-
+    
+    print("[INFO] Attempting to open Android camera...")
+    
+    # Strategy 1: Try CAP_ANDROID backend with different indices
+    for idx in [0, 1, -1]:
+        try:
+            print(f"[INFO] Trying CAP_ANDROID backend with index {idx}")
+            cap = cv2.VideoCapture(idx, cv2.CAP_ANDROID)
+            time.sleep(0.5)  # Give camera time to initialize
+            
+            if cap.isOpened():
+                # Test if we can actually read a frame
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    print(f"[SUCCESS] Camera opened with CAP_ANDROID on index {idx}")
+                    # Set optimal parameters
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    return cap
+                else:
+                    print(f"[WARN] Camera opened but cannot read frames on index {idx}")
+                    cap.release()
+            else:
+                cap.release()
+        except Exception as e:
+            print(f"[ERROR] CAP_ANDROID index {idx} failed: {e}")
+    
+    # Strategy 2: Try default backend
     for idx in [0, 1]:
-        cap = cv2.VideoCapture(idx, cv2.CAP_ANDROID)
-
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            cap.set(cv2.CAP_PROP_FPS, 30)
-            print(f"[INFO] Android camera opened on index {idx}")
-            return cap
-
-        cap.release()
-
-    print("[ERROR] Failed to open Android camera")
+        try:
+            print(f"[INFO] Trying default backend with index {idx}")
+            cap = cv2.VideoCapture(idx)
+            time.sleep(0.5)
+            
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    print(f"[SUCCESS] Camera opened with default backend on index {idx}")
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    return cap
+                else:
+                    cap.release()
+            else:
+                cap.release()
+        except Exception as e:
+            print(f"[ERROR] Default backend index {idx} failed: {e}")
+    
+    print("[ERROR] All camera initialization strategies failed")
     return None
 
 
@@ -122,9 +164,24 @@ class CameraScreen(Screen):
         self.event = None
 
     def start_camera(self, processor):
+        """Start camera with permission checks and retry logic."""
         print("[INFO] Starting camera…")
         self.processor = processor
-
+        
+        # Check permissions on Android
+        if platform == "android":
+            app = App.get_running_app()
+            
+            # Wait a bit for permissions to be processed
+            from time import sleep
+            sleep(0.5)
+            
+            if not app.permissions_granted:
+                print("[ERROR] Camera permissions not granted")
+                self.show_error("Camera permission required.\nPlease grant permission and restart the app.")
+                return
+        
+        # Try to open camera
         if platform == "android":
             self.capture = open_android_camera()
         else:
@@ -132,9 +189,10 @@ class CameraScreen(Screen):
 
         if not self.capture or not self.capture.isOpened():
             print("[ERROR] Camera unavailable.")
-            self.show_error("Camera could not be opened.\nCheck permissions.")
+            self.show_error("Camera could not be opened.\nTry:\n1. Restart the app\n2. Check camera permissions\n3. Close other camera apps")
             return
 
+        print("[INFO] Camera opened successfully!")
         self.hide_error()
         self.event = Clock.schedule_interval(self.update, 1/30)
 
@@ -158,13 +216,22 @@ class CameraScreen(Screen):
             return
 
         ret, frame = self.capture.read()
-        if not ret:
-            print("[WARN] Empty frame.")
+        if not ret or frame is None:
+            print("[WARN] Empty or invalid frame.")
+            return
+        
+        # Validate frame has valid dimensions
+        if frame.shape[0] == 0 or frame.shape[1] == 0:
+            print("[WARN] Frame has invalid dimensions.")
             return
 
         # Apply your analyzer
         if self.processor:
-            frame = self.processor.process_frame(frame)
+            try:
+                frame = self.processor.process_frame(frame)
+            except Exception as e:
+                print(f"[ERROR] Frame processing failed: {e}")
+                return
 
             # update global height from height estimator
             if isinstance(self.processor, HeightEstimator):
@@ -195,6 +262,10 @@ class CameraScreen(Screen):
 #  MAIN APP
 # ================================================
 class FitnessApp(App):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.permissions_granted = False
+        
     def build(self):
         Window.clearcolor = (0.1, 0.1, 0.1, 1)
         sm = ScreenManager()
@@ -203,14 +274,35 @@ class FitnessApp(App):
         return sm
 
     def on_start(self):
+        """Request permissions when app starts."""
         if platform == "android":
-            from android.permissions import request_permissions, Permission
-
-            request_permissions([
-                Permission.CAMERA,
-                Permission.READ_EXTERNAL_STORAGE,
-                Permission.WRITE_EXTERNAL_STORAGE
-            ])
+            from android.permissions import request_permissions, Permission, check_permission
+            
+            # Check if we already have camera permission
+            has_camera = check_permission(Permission.CAMERA)
+            
+            if has_camera:
+                print("[INFO] Camera permission already granted")
+                self.permissions_granted = True
+            else:
+                print("[INFO] Requesting camera permissions...")
+                request_permissions([
+                    Permission.CAMERA,
+                    Permission.WRITE_EXTERNAL_STORAGE,
+                    Permission.READ_EXTERNAL_STORAGE
+                ], self.permission_callback)
+        else:
+            # On desktop, permissions are not needed
+            self.permissions_granted = True
+    
+    def permission_callback(self, permissions, grant_results):
+        """Callback when permissions are granted or denied."""
+        if all(grant_results):
+            print("[INFO] All permissions granted!")
+            self.permissions_granted = True
+        else:
+            print("[WARN] Some permissions were denied")
+            self.permissions_granted = False
 
 
 if __name__ == "__main__":
