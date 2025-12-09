@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build with Buildozer
-        uses: HeaTTheatR/buildozer-action@v1
+        uses: n8marti/buildozer-action@fix-user-doesnt-exist
         id: buildozer
         with:
           command: buildozer android debug
