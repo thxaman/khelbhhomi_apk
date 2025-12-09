@@ -12,7 +12,7 @@ from kivy.utils import platform
 import cv2
 import numpy as np
 
-# Import our refactored modules
+# Your analyzers (unchanged)
 from height_estimator import HeightEstimator
 from reach_test import ReachTestAnalyzer
 from situp_counter import SitUpCounter
@@ -22,143 +22,196 @@ from sit_reach_box import SitReachBoxAnalyzer
 
 GLOBAL_USER_HEIGHT = 170
 
+
+# ================================================
+#  FIXED ANDROID CAMERA OPEN FUNCTION
+# ================================================
+def open_android_camera():
+    """Open Camera using Android Camera2 backend + fail-safe settings."""
+    cv2.setNumThreads(1)
+    cv2.ocl.setUseOpenCL(False)
+
+    for idx in [0, 1]:
+        cap = cv2.VideoCapture(idx, cv2.CAP_ANDROID)
+
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            print(f"[INFO] Android camera opened on index {idx}")
+            return cap
+
+        cap.release()
+
+    print("[ERROR] Failed to open Android camera")
+    return None
+
+
+# ================================================
+#  MENU SCREEN
+# ================================================
 class MenuScreen(Screen):
     def __init__(self, **kwargs):
         super(MenuScreen, self).__init__(**kwargs)
         layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        
+
         title = Label(text="Fitness Vision Tools", font_size=32, size_hint=(1, 0.15))
         layout.add_widget(title)
-        
-        btn_height = Button(text="Height Measurement", font_size=20, background_color=(0, 0.5, 1, 1))
-        btn_height.bind(on_press=self.go_to_height)
-        layout.add_widget(btn_height)
-        
-        btn_reach = Button(text="Sit and Reach (Side)", font_size=20, background_color=(0, 0.8, 0.2, 1))
-        btn_reach.bind(on_press=self.go_to_reach)
-        layout.add_widget(btn_reach)
-        
-        btn_situps = Button(text="Sit-Up Counter", font_size=20, background_color=(1, 0.5, 0, 1))
-        btn_situps.bind(on_press=self.go_to_situps)
-        layout.add_widget(btn_situps)
 
-        btn_broad = Button(text="Broad Jump", font_size=20, background_color=(0.5, 0, 0.5, 1))
-        btn_broad.bind(on_press=self.go_to_broad)
-        layout.add_widget(btn_broad)
+        buttons = [
+            ("Height Measurement", self.go_to_height),
+            ("Sit and Reach (Side)", self.go_to_reach),
+            ("Sit-Up Counter", self.go_to_situps),
+            ("Broad Jump", self.go_to_broad),
+            ("Vertical Jump", self.go_to_vertical),
+            ("Sit and Reach (Box)", self.go_to_reach_box),
+        ]
 
-        btn_vertical = Button(text="Vertical Jump", font_size=20, background_color=(0.8, 0.2, 0.2, 1))
-        btn_vertical.bind(on_press=self.go_to_vertical)
-        layout.add_widget(btn_vertical)
+        for txt, func in buttons:
+            b = Button(text=txt, font_size=20, background_color=(0.2, 0.5, 1, 1))
+            b.bind(on_press=func)
+            layout.add_widget(b)
 
-        btn_reach_box = Button(text="Sit and Reach (Box)", font_size=20, background_color=(0, 0.5, 0.5, 1))
-        btn_reach_box.bind(on_press=self.go_to_reach_box)
-        layout.add_widget(btn_reach_box)
-        
         self.add_widget(layout)
 
-    def go_to_height(self, instance):
-        self.manager.get_screen('camera').start_camera(HeightEstimator())
-        self.manager.current = 'camera'
+    def go_to_height(self, inst):
+        self.manager.get_screen("camera").start_camera(HeightEstimator())
+        self.manager.current = "camera"
 
-    def go_to_reach(self, instance):
-        self.manager.get_screen('camera').start_camera(ReachTestAnalyzer())
-        self.manager.current = 'camera'
+    def go_to_reach(self, inst):
+        self.manager.get_screen("camera").start_camera(ReachTestAnalyzer())
+        self.manager.current = "camera"
 
-    def go_to_situps(self, instance):
-        self.manager.get_screen('camera').start_camera(SitUpCounter())
-        self.manager.current = 'camera'
+    def go_to_situps(self, inst):
+        self.manager.get_screen("camera").start_camera(SitUpCounter())
+        self.manager.current = "camera"
 
-    def go_to_broad(self, instance):
-        self.manager.get_screen('camera').start_camera(BroadJumpAnalyzer(user_height_cm=GLOBAL_USER_HEIGHT))
-        self.manager.current = 'camera'
+    def go_to_broad(self, inst):
+        self.manager.get_screen("camera").start_camera(BroadJumpAnalyzer(user_height_cm=GLOBAL_USER_HEIGHT))
+        self.manager.current = "camera"
 
-    def go_to_vertical(self, instance):
-        self.manager.get_screen('camera').start_camera(VerticalJumpAnalyzer(user_height_cm=GLOBAL_USER_HEIGHT))
-        self.manager.current = 'camera'
+    def go_to_vertical(self, inst):
+        self.manager.get_screen("camera").start_camera(VerticalJumpAnalyzer(user_height_cm=GLOBAL_USER_HEIGHT))
+        self.manager.current = "camera"
 
-    def go_to_reach_box(self, instance):
-        self.manager.get_screen('camera').start_camera(SitReachBoxAnalyzer())
-        self.manager.current = 'camera'
+    def go_to_reach_box(self, inst):
+        self.manager.get_screen("camera").start_camera(SitReachBoxAnalyzer())
+        self.manager.current = "camera"
 
+
+# ================================================
+#  CAMERA SCREEN (FULLY FIXED)
+# ================================================
 class CameraScreen(Screen):
     def __init__(self, **kwargs):
         super(CameraScreen, self).__init__(**kwargs)
-        self.layout = BoxLayout(orientation='vertical')
-        
-        # Camera Image Widget
+
+        self.layout = BoxLayout(orientation="vertical")
         self.img_widget = Image()
+
         self.layout.add_widget(self.img_widget)
-        
-        # Back Button
-        btn_back = Button(text="Back to Menu", size_hint=(1, 0.1), background_color=(1, 0, 0, 1))
-        btn_back.bind(on_press=self.stop_camera)
-        self.layout.add_widget(btn_back)
-        
+
+        back = Button(text="Back to Menu", size_hint=(1, 0.1), background_color=(1, 0, 0, 1))
+        back.bind(on_press=self.stop_camera)
+        self.layout.add_widget(back)
+
         self.add_widget(self.layout)
-        
+
         self.capture = None
-        self.event = None
         self.processor = None
+        self.event = None
 
     def start_camera(self, processor):
+        print("[INFO] Starting camera…")
         self.processor = processor
-        # 0 is usually the default camera. On Android, this might need adjustment or permissions.
-        self.capture = cv2.VideoCapture(0)
-        if not self.capture.isOpened():
-            print("Error: Could not open camera.")
-        self.event = Clock.schedule_interval(self.update, 1.0 / 30.0) # 30 FPS
 
-    def stop_camera(self, instance=None):
+        if platform == "android":
+            self.capture = open_android_camera()
+        else:
+            self.capture = cv2.VideoCapture(0)
+
+        if not self.capture or not self.capture.isOpened():
+            print("[ERROR] Camera unavailable.")
+            self.show_error("Camera could not be opened.\nCheck permissions.")
+            return
+
+        self.hide_error()
+        self.event = Clock.schedule_interval(self.update, 1/30)
+
+    # -------------------------
+    def stop_camera(self, *args):
         if self.event:
             self.event.cancel()
+
         if self.capture:
             self.capture.release()
+
         self.capture = None
         self.processor = None
-        self.manager.current = 'menu'
+        self.manager.current = "menu"
 
+    # -------------------------
     def update(self, dt):
         global GLOBAL_USER_HEIGHT
-        if self.capture:
-            ret, frame = self.capture.read()
-            if ret:
-                # Process the frame using the selected logic
-                if self.processor:
-                    frame = self.processor.process_frame(frame)
-                    
-                    # Check for height update
-                    if isinstance(self.processor, HeightEstimator):
-                        h = self.processor.get_height()
-                        if h is not None:
-                            GLOBAL_USER_HEIGHT = h
-                            # Optional: Show a toast or label that height is updated
 
-                # Convert to Kivy Texture
-                # Flip vertical because Kivy textures are upside down
-                buf1 = cv2.flip(frame, 0)
-                buf = buf1.tobytes()
-                image_texture = Texture.create(size=(frame.shape[1], frame.shape[0]), colorfmt='bgr')
-                image_texture.blit_buffer(buf, colorfmt='bgr', bufferfmt='ubyte')
-                
-                self.img_widget.texture = image_texture
+        if not self.capture:
+            return
 
+        ret, frame = self.capture.read()
+        if not ret:
+            print("[WARN] Empty frame.")
+            return
+
+        # Apply your analyzer
+        if self.processor:
+            frame = self.processor.process_frame(frame)
+
+            # update global height from height estimator
+            if isinstance(self.processor, HeightEstimator):
+                result = self.processor.get_height()
+                if result:
+                    GLOBAL_USER_HEIGHT = result
+
+        # Kivy uses bottom-left origin → flip vertically
+        frame = cv2.flip(frame, 0)
+
+        texture = Texture.create(size=(frame.shape[1], frame.shape[0]), colorfmt="bgr")
+        texture.blit_buffer(frame.tobytes(), colorfmt="bgr", bufferfmt="ubyte")
+        self.img_widget.texture = texture
+
+    # -------------------------
+    def show_error(self, text):
+        self.hide_error()
+        self.error_lbl = Label(text=text, color=(1, 0, 0, 1), font_size=24)
+        self.layout.add_widget(self.error_lbl)
+
+    def hide_error(self):
+        if hasattr(self, "error_lbl"):
+            self.layout.remove_widget(self.error_lbl)
+            del self.error_lbl
+
+
+# ================================================
+#  MAIN APP
+# ================================================
 class FitnessApp(App):
     def build(self):
         Window.clearcolor = (0.1, 0.1, 0.1, 1)
         sm = ScreenManager()
-        sm.add_widget(MenuScreen(name='menu'))
-        sm.add_widget(CameraScreen(name='camera'))
+        sm.add_widget(MenuScreen(name="menu"))
+        sm.add_widget(CameraScreen(name="camera"))
         return sm
 
     def on_start(self):
-        if platform == 'android':
+        if platform == "android":
             from android.permissions import request_permissions, Permission
+
             request_permissions([
                 Permission.CAMERA,
-                Permission.WRITE_EXTERNAL_STORAGE,
-                Permission.READ_EXTERNAL_STORAGE
+                Permission.READ_EXTERNAL_STORAGE,
+                Permission.WRITE_EXTERNAL_STORAGE
             ])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     FitnessApp().run()
